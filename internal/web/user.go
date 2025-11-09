@@ -3,7 +3,10 @@ package web
 import (
 	"net/http"
 
+	"github.com/ILk8S/basc-go/internal/domain"
+	"github.com/ILk8S/basc-go/internal/service"
 	regexp "github.com/dlclark/regexp2"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,19 +16,21 @@ const (
 	passwordRegexPattern = `^(?=.*[A-Za-z])(?=.*\d)(?=.*[$@$!%*#?&])[A-Za-z\d$@$!%*#?&]{8,}$`
 )
 
-type UserHander struct {
+type UserHandler struct {
 	emailRegexExp    *regexp.Regexp
 	passwordRegexExp *regexp.Regexp
+	svc              *service.UserService
 }
 
-func NewUserHandler() *UserHander {
-	return &UserHander{
+func NewUserHandler(svc *service.UserService) *UserHandler {
+	return &UserHandler{
 		emailRegexExp:    regexp.MustCompile(emailRegexExpPattern, regexp.None),
 		passwordRegexExp: regexp.MustCompile(passwordRegexPattern, regexp.None),
+		svc:              svc,
 	}
 }
 
-func (h *UserHander) RegisterRoutes(server *gin.Engine) {
+func (h *UserHandler) RegisterRoutes(server *gin.Engine) {
 	ug := server.Group("/users")
 	ug.POST("/signup", h.SignUp)
 	ug.POST("/login", h.Login)
@@ -33,7 +38,7 @@ func (h *UserHander) RegisterRoutes(server *gin.Engine) {
 	ug.GET("/profile", h.Profile)
 }
 
-func (h *UserHander) SignUp(ctx *gin.Context) {
+func (h *UserHandler) SignUp(ctx *gin.Context) {
 	type SignUpReq struct {
 		Email           string `json:"email"`
 		Password        string `json:"password"`
@@ -66,17 +71,55 @@ func (h *UserHander) SignUp(ctx *gin.Context) {
 		ctx.String(http.StatusOK, "密码必须包含字母、数字、特殊字符，并且不少于八位")
 		return
 	}
-	ctx.String(http.StatusOK, "hello, 已经注册")
+	err = h.svc.Signup(ctx, domain.User{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	switch err {
+	case nil:
+		ctx.String(http.StatusOK, "注册成功")
+	case service.ErrDuplicateEmail:
+		ctx.String(http.StatusOK, "邮箱冲突，请换一个")
+	default:
+		ctx.String(http.StatusOK, "系统错误")
+	}
 }
 
-func (h *UserHander) Login(ctx *gin.Context) {
+func (h *UserHandler) Login(ctx *gin.Context) {
+	type Req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	var req Req
+	if err := ctx.Bind(&req); err != nil {
+		return
+	}
+	u, err := h.svc.Login(ctx, req.Email, req.Password)
+	switch err {
+	case nil:
+		sess := sessions.Default(ctx)
+		sess.Set("userId", u.Id)
+		sess.Options(sessions.Options{
+			//15分钟
+			MaxAge: 900,
+		})
+		err = sess.Save()
+		if err != nil {
+			ctx.String(http.StatusOK, "系统错误")
+			return
+		}
+		ctx.String(http.StatusOK, "登陆成功")
+	case service.ErrInvalidUserOrPassword:
+		ctx.String(http.StatusOK, "用户名或密码不正确")
+	default:
+		ctx.String(http.StatusOK, "系统错误")
+	}
+}
+
+func (h *UserHandler) Edit(ctx *gin.Context) {
 
 }
 
-func (h *UserHander) Edit(ctx *gin.Context) {
-
-}
-
-func (h *UserHander) Profile(ctx *gin.Context) {
-
+func (h *UserHandler) Profile(ctx *gin.Context) {
+	ctx.String(http.StatusOK, "this is profile")
 }
