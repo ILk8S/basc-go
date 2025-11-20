@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ILk8S/basc-go/internal/repository"
+	"github.com/ILk8S/basc-go/internal/repository/cache"
 	"github.com/ILk8S/basc-go/internal/repository/dao"
 	"github.com/ILk8S/basc-go/internal/service"
 	"github.com/ILk8S/basc-go/internal/web"
@@ -22,8 +23,9 @@ import (
 
 func main() {
 	db := initDB()
+	redisCmd := initRedis()
 	server := initWebServer()
-	initUserHdl(db, server)
+	initUserHdl(db, server, redisCmd)
 	server.Run(":8899")
 }
 
@@ -44,7 +46,8 @@ func initWebServer() *gin.Engine {
 	server.Use(cors.New(cors.Config{
 		AllowCredentials: true,
 		//AllowHeaders:     []string{"Content-Type"},
-		AllowHeaders:  []string{"Content-Type", "Authorization"},
+		AllowHeaders: []string{"Content-Type", "Authorization"},
+		//不加这个前端取不到
 		ExposeHeaders: []string{"x-jwt-token"},
 		AllowOriginFunc: func(origin string) bool {
 			if strings.HasPrefix(origin, "http://localhost") {
@@ -52,6 +55,7 @@ func initWebServer() *gin.Engine {
 			}
 			return strings.Contains(origin, "/users")
 		},
+		//在12小时内，同一个类型的跨域不需要再发送预见请求了
 		MaxAge: 12 * time.Hour,
 	}), func(ctx *gin.Context) {
 		fmt.Println("Middleware")
@@ -83,10 +87,18 @@ func useSession(server *gin.Engine) {
 	server.Use(sessions.Sessions("ssid", store), login.CheckLogin())
 }
 
-func initUserHdl(db *gorm.DB, server *gin.Engine) {
+func initUserHdl(db *gorm.DB, server *gin.Engine, cmd redis.Cmdable) {
 	ud := dao.NewUserDAO(db)
-	ur := repository.NewUserRepository(ud)
+	uc := cache.NewUserCache(cmd)
+	ur := repository.NewUserRepository(ud, uc)
 	us := service.NewUserService(ur)
 	hdl := web.NewUserHandler(us)
 	hdl.RegisterRoutes(server)
+}
+
+func initRedis() redis.Cmdable {
+	return redis.NewClient(&redis.Options{
+		Addr:     "192.168.1.40:6379",
+		Password: "pA3L48JS",
+	})
 }
